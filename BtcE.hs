@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric, DeriveDataTypeable, OverloadedStrings, BangPatterns #-}
+{-# LANGUAGE DeriveGeneric, DeriveDataTypeable, OverloadedStrings, BangPatterns, TypeSynonymInstances, FlexibleInstances #-}
 
 -- BTC-E.com API
 
@@ -12,6 +12,7 @@ import qualified Data.Text                  as T
 import qualified Data.HashMap.Strict        as H
 import qualified Data.Graph.Inductive.Graph as G
 
+import Data.Bits                   (xor)
 import Data.Word                   (Word8, Word16, Word32)
 import Data.Char                   (ord, chr, toLower, isDigit)
 import Data.List                   (foldl', stripPrefix, group, sort)
@@ -30,13 +31,12 @@ import Control.Monad.Trans.Resource (ResourceT)
 import Network.HTTP.Base            (urlEncodeVars)
 import Network.HTTP.Conduit         (Manager, newManager, httpLbs,
                                      Request, RequestBody(RequestBodyLBS), requestHeaders, requestBody, urlEncodedBody, responseBody,
-                                     def, secure, host, port, path, responseTimeout, decompress, alwaysDecompress)
+                                     parseUrl, secure, host, port, path, responseTimeout, decompress, alwaysDecompress)
 import Data.Aeson                   (FromJSON, Value(Object, Array, String, Number), (.:), parseJSON, eitherDecode)
 import Data.Aeson.Types             (Parser)
 
 import Data.Typeable      (Typeable)
-import Data.Hashable      (Hashable)
-import GHC.Generics       (Generic)
+import Data.Hashable      (Hashable(..))
 import Control.Exception  (Exception, throw)
 
 -- ==== REQUESTS ==== --
@@ -70,25 +70,94 @@ class Timestamped a where
 class FundsListing a where
   funds :: a -> H.HashMap Currency Rational
 
--- == Currency == --
+-- == Currency and Amount== --
 
-data Currency = BTC | LTC | FTC | NMC | NVC | PPC | TRC | USD | EUR | RUR | NeedsToBeAdded !String
-  deriving (Generic, Show, Eq, Ord)
+type Currency = Rational -> Amount
 
-instance Hashable Currency
+data Amount = BTC Rational
+            | LTC Rational
+            | FTC Rational
+            | NMC Rational
+            | NVC Rational
+            | PPC Rational
+            | TRC Rational
+            | USD Rational
+            | EUR Rational
+            | RUR Rational
+            | NeedsToBeAdded !String Rational
+  deriving (Show, Eq, Ord)
+
+instance Hashable Currency where
+  hashWithSalt n x = xor (16777619*n) (fromEnum x)
+
+instance Show Currency where
+  showsPrec p x = showParen (p > 0) . showString $
+                    case x undefined of
+                      BTC _ -> "BTC"
+                      LTC _ -> "LTC"
+                      FTC _ -> "FTC"
+                      NMC _ -> "NMC"
+                      NVC _ -> "NVC"
+                      PPC _ -> "PPC"
+                      TRC _ -> "TRC"
+                      USD _ -> "USD"
+                      EUR _ -> "EUR"
+                      RUR _ -> "RUR"
+                      NeedsToBeAdded xs _ -> "NeedsToBeAdded " ++ xs
+
+instance Eq Currency where
+  x == y = case (x undefined, y undefined) of
+             (BTC _, BTC _) -> True
+             (LTC _, LTC _) -> True
+             (FTC _, FTC _) -> True
+             (NMC _, NMC _) -> True
+             (NVC _, NVC _) -> True
+             (PPC _, PPC _) -> True
+             (TRC _, TRC _) -> True
+             (USD _, USD _) -> True
+             (EUR _, EUR _) -> True
+             (RUR _, RUR _) -> True
+             (NeedsToBeAdded xs _, NeedsToBeAdded ys _) -> xs == ys
+             _              -> False
+
+instance Ord Currency where
+  compare x y = if   x == y then EQ
+                else case (x undefined, y undefined) of
+                       (BTC _, _) -> LT
+                       (_, BTC _) -> GT
+                       (LTC _, _) -> LT
+                       (_, LTC _) -> GT
+                       (FTC _, _) -> LT
+                       (_, FTC _) -> GT
+                       (NMC _, _) -> LT
+                       (_, NMC _) -> GT
+                       (NVC _, _) -> LT
+                       (_, NVC _) -> GT
+                       (PPC _, _) -> LT
+                       (_, PPC _) -> GT
+                       (TRC _, _) -> LT
+                       (_, TRC _) -> GT
+                       (USD _, _) -> LT
+                       (_, USD _) -> GT
+                       (EUR _, _) -> LT
+                       (_, EUR _) -> GT
+                       (RUR _, _) -> LT
+                       (_, RUR _) -> GT
+                       (NeedsToBeAdded xs _, NeedsToBeAdded ys _) -> compare xs ys
 
 instance Enum Currency where
-  fromEnum BTC = 0
-  fromEnum LTC = 1
-  fromEnum FTC = 2
-  fromEnum NMC = 3
-  fromEnum NVC = 4
-  fromEnum PPC = 5
-  fromEnum TRC = 6
-  fromEnum USD = 7
-  fromEnum EUR = 8
-  fromEnum RUR = 9
-  fromEnum (NeedsToBeAdded xs) = join seq . fromInteger . uncurry (+) . first head . foldl' (\((_:bs), !r) e -> (bs, 26*r + e)) (letterCountBreaks, 0) . map (toInteger . subtract (ord 'a') . ord) $ xs
+  fromEnum x = case x undefined of
+                 BTC _ -> 0
+                 LTC _ -> 1
+                 FTC _ -> 2
+                 NMC _ -> 3
+                 NVC _ -> 4
+                 PPC _ -> 5
+                 TRC _ -> 6
+                 USD _ -> 7
+                 EUR _ -> 8
+                 RUR _ -> 9
+                 NeedsToBeAdded xs _ -> join seq . fromInteger . uncurry (+) . first head . foldl' (\((_:bs), !r) e -> (bs, 26*r + e)) (letterCountBreaks, 0) . map (toInteger . subtract (ord 'a') . ord) $ xs
   
   toEnum 0 = BTC
   toEnum 1 = LTC
@@ -122,17 +191,18 @@ toCurrency "rur" = RUR
 toCurrency x     = NeedsToBeAdded x
 
 fromCurrency :: Currency -> String
-fromCurrency BTC = "btc"
-fromCurrency LTC = "ltc"
-fromCurrency FTC = "ftc"
-fromCurrency NMC = "nmc"
-fromCurrency NVC = "nvc"
-fromCurrency PPC = "ppc"
-fromCurrency TRC = "trc"
-fromCurrency USD = "usd"
-fromCurrency EUR = "eur"
-fromCurrency RUR = "rur"
-fromCurrency (NeedsToBeAdded x) = x
+fromCurrency x = case x undefined of
+                   BTC _ -> "btc"
+                   LTC _ -> "ltc"
+                   FTC _ -> "ftc"
+                   NMC _ -> "nmc"
+                   NVC _ -> "nvc"
+                   PPC _ -> "ppc"
+                   TRC _ -> "trc"
+                   USD _ -> "usd"
+                   EUR _ -> "eur"
+                   RUR _ -> "rur"
+                   NeedsToBeAdded x _ -> x
 
 -- == TradeType == --
 
@@ -462,17 +532,17 @@ userAgent = "btce-hs/0.0 (GitHub Olathe/btce-hs)"
 -- ==== LOW-LEVEL REQUEST HANDLING ==== --
 
 makeRequest :: (FromJSON t) => SB.ByteString -> [(String, String)] -> Manager -> ResourceT IO (Either String t)
-makeRequest !path !params !httpManager = let params'  = SB.pack . ('?':) . urlEncodeVars $ params
-                                             !request = def {
-                                                              secure = True,
-                                                              host = "btc-e.com",
-                                                              port = 443,
-                                                              path = SB.concat ["/api/3/", path, params'],
-                                                              requestHeaders = ("User-Agent", userAgent):requestHeaders def,
-                                                              responseTimeout = Just 10000000,
-                                                              decompress = alwaysDecompress
-                                                            }
-                                         in liftM (eitherDecode . responseBody) $ httpLbs request httpManager
+makeRequest !path !params !httpManager = do
+                                             let params'       = SB.pack . ('?':) . urlEncodeVars $ params
+                                                 pathAndParams = SB.concat [path, params']
+                                             request' <- parseUrl ("https://btc-e.com/api/3/" ++ LL.toString pathAndParams)
+                                             let !request = request' {
+                                                                       requestHeaders = ("User-Agent", userAgent):requestHeaders request',
+                                                                       responseTimeout = Just 10000000,
+                                                                       decompress = alwaysDecompress
+                                                                     }
+                                             response <- httpLbs request httpManager
+                                             return . eitherDecode . responseBody $ response
 
 newtype SecureResponse t = SecureResponse t
   deriving (Show)
@@ -504,16 +574,13 @@ makeSecureRequest !method !params !(Account !key !secret !nonceRef) !httpManager
     go :: (FromJSON t) => [(SB.ByteString, SB.ByteString)] -> SB.ByteString -> LB.ByteString -> MVar Word32 -> Manager -> Word32 -> ResourceT IO (Either String t)
     go params key secret nonceRef httpManager !nonce = do
       when (nonce == maxBound) $ lift (putMVar nonceRef nonce >> throw APIKeyUsedUp)
+      request' <- parseUrl "https://btc-e.com/tapi"
       let !request = signedURLEncodedBody secret nonce params $
-                      def { 
-                            secure = True,
-                            host = "btc-e.com",
-                            port = 443,
-                            path = "/tapi",
-                            requestHeaders = ("User-Agent", userAgent):("Key", key):requestHeaders def,
-                            responseTimeout = Just 10000000,
-                            decompress = alwaysDecompress
-                          }
+                      request' { 
+                                 requestHeaders = ("User-Agent", userAgent):("Key", key):requestHeaders request',
+                                 responseTimeout = Just 10000000,
+                                 decompress = alwaysDecompress
+                               }
       !res <- fmap responseBody $ httpLbs request httpManager
       let !response = unwrapSecureResponse . eitherDecode $ res
       case response of
@@ -525,7 +592,7 @@ makeSecureRequest !method !params !(Account !key !secret !nonceRef) !httpManager
     addNonceParameter :: Word32 -> [(SB.ByteString, SB.ByteString)] -> [(SB.ByteString, SB.ByteString)]
     addNonceParameter !nonce = (("nonce", SB.pack (show nonce)):) . filter ((/= "nonce") . map toLower . SB.unpack . fst)
     
-    signedURLEncodedBody :: (Monad m) => LB.ByteString -> Word32 -> [(SB.ByteString, SB.ByteString)] -> Request m -> Request m
+    signedURLEncodedBody :: LB.ByteString -> Word32 -> [(SB.ByteString, SB.ByteString)] -> Request -> Request
     signedURLEncodedBody !secret !nonce !params !request = let request'            = urlEncodedBody (addNonceParameter nonce params) request
                                                                RequestBodyLBS body = requestBody request'
                                                                signature           = SB.pack . showDigest . hmacSha512 secret $ body
@@ -540,16 +607,13 @@ makeSecureRequest' !method !params !(Account !key !secret !nonceRef) !httpManage
     go params key secret nonceRef httpManager !nonce = do
       lift $ print nonce
       when (nonce == maxBound) $ lift (putMVar nonceRef nonce >> throw APIKeyUsedUp)
+      request' <- parseUrl "https://btc-e.com/tapi"
       let !request = signedURLEncodedBody secret nonce params $
-                      def { 
-                            secure = True,
-                            host = "btc-e.com",
-                            port = 443,
-                            path = "/tapi",
-                            requestHeaders = ("User-Agent", userAgent):("Key", key):requestHeaders def,
-                            responseTimeout = Just 10000000,
-                            decompress = alwaysDecompress
-                          }
+                      request' { 
+                                 requestHeaders = ("User-Agent", userAgent):("Key", key):requestHeaders request',
+                                 responseTimeout = Just 10000000,
+                                 decompress = alwaysDecompress
+                               }
       !response <- httpLbs request httpManager
       let !text = LB.unpack $ responseBody response
       lift $ print text
@@ -560,7 +624,7 @@ makeSecureRequest' !method !params !(Account !key !secret !nonceRef) !httpManage
     addNonceParameter :: Word32 -> [(SB.ByteString, SB.ByteString)] -> [(SB.ByteString, SB.ByteString)]
     addNonceParameter !nonce = (("nonce", SB.pack (show nonce)):) . filter ((/= "nonce") . map toLower . SB.unpack . fst)
     
-    signedURLEncodedBody :: (Monad m) => LB.ByteString -> Word32 -> [(SB.ByteString, SB.ByteString)] -> Request m -> Request m
+    signedURLEncodedBody :: LB.ByteString -> Word32 -> [(SB.ByteString, SB.ByteString)] -> Request -> Request
     signedURLEncodedBody !secret !nonce !params !request = let request'            = urlEncodedBody (addNonceParameter nonce params) request
                                                                RequestBodyLBS body = requestBody request'
                                                                signature           = SB.pack . showDigest . hmacSha512 secret $ body
