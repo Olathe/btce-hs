@@ -1,0 +1,20 @@
+Name:                BtcE
+Version:             0.0.0.1
+Category:            Network
+Synopsis:            Library for using the BTC-E Public [Web] API v3 to interact with BTC-E
+Homepage:            http://github.com/Olathe/btce-hs
+License:             LGPL-3
+License-File:        LICENSE
+Author:              Cash Erler
+Maintainer:          erlercw+hackage@gmail.com
+Build-Type:          Simple
+Cabal-Version:       >= 1.8
+
+Library
+  Exposed-Modules:   Network.BtcE
+  -- Nonexposed modules under Other-Modules
+  -- Other-Modules:
+  Build-Depends:     aeson >= 0.7.0.0, base >= 4.6.0.1, bytestring >= 0.10.0.2, fgl >= 5.4.2.4, hashable >= 1.2.1.0,
+                     HTTP >= 4000.2.10, http-conduit >= 2.0.0.3, ListLike >= 4.0.2, old-time >= 1.1.0.1, resourcet >= 0.4.10,
+                     SHA >= 1.6.4, text >= 1.1.0.0, transformers >= 0.3.0.0, unordered-containers >= 0.2.3.3, vector >= 0.10.9.1
+  GHC-Options:       -Wall -O2

@@ -2,7 +2,7 @@
 
 -- BTC-E.com API
 
-module BtcE where
+module Network.BtcE where
 
 import qualified Data.ListLike              as LL
 import qualified Data.ByteString.Lazy.Char8 as LB
@@ -222,7 +222,7 @@ instance Eq Account where
   (Account key1 secret1 _) == (Account key2 secret2 _) = (key1 == key2) && (secret1 == secret2)
 
 getAccount :: (LL.StringLike a, LL.StringLike b) => a -> b -> ResourceT IO Account
-getAccount key secret = lift (newMVar 1) >>= return . Account (LL.fromString (LL.toString key)) (LL.fromString (LL.toString secret))
+getAccount key secret = lift (newMVar 1) >>= return . Account (SB.pack (LL.toString key)) (LB.pack (LL.toString secret))
 
 data BtcEException = APIKeyUsedUp
                    | ServerError !String
@@ -257,7 +257,7 @@ instance FromJSON CompletedTradeInfo where
   parseJSON (Object !v) = CompletedTradeInfo <$> liftM (flip TOD 0)                                           (v .: "timestamp")
                                              <*>                                                              (v .: "tid")
                                              <*> liftM  (\x   -> if x == ("bid" :: String) then Bid else Ask) (v .: "type")
-                                             <*> liftM2 (\x y -> Offer (repairRational x) (repairRational y)) (v .: "price") (v .: "amount")
+                                             <*> liftM2 Offer                                                 (v .: "price")     (v .: "amount")
   parseJSON x           = fail ("Received wrong kind of JSON entity: " ++ show x)
 
 -- == PairInfo == --
@@ -315,10 +315,10 @@ finishPairInfo :: ClockTime -> Currency -> Currency -> String -> Bool -> PairInf
 finishPairInfo timestamp from to rawPair reversed (PairInfo' a b c d e f) = PairInfo timestamp from to a b c d rawPair reversed e f
 
 instance FromJSON PairInfo' where
-  parseJSON (Object !v) = PairInfo' <$> liftM repairRational            (v .: "min_price")
-                                    <*> liftM repairRational            (v .: "max_price")
-                                    <*> liftM repairRational            (v .: "min_amount")
-                                    <*> liftM ((/100) . repairRational) (v .: "fee")
+  parseJSON (Object !v) = PairInfo' <$> v .: "min_price"
+                                    <*> v .: "max_price"
+                                    <*> v .: "min_amount"
+                                    <*> liftM (/100) (v .: "fee")
                                     <*> v .: "decimal_places"
                                     <*> liftM (/= (0 :: Word8)) (v .: "hidden")
   parseJSON x           = fail ("Received wrong kind of JSON entity: " ++ show x)
@@ -379,14 +379,14 @@ instance Show Ticker where
 
 instance FromJSON Ticker where
   parseJSON (Object !v) = Ticker <$> liftM (flip TOD 0)   (v .: "updated")
-                                 <*> liftM repairRational (v .: "buy")
-                                 <*> liftM repairRational (v .: "sell")
-                                 <*> liftM repairRational (v .: "last")
-                                 <*> liftM repairRational (v .: "high")
-                                 <*> liftM repairRational (v .: "avg")
-                                 <*> liftM repairRational (v .: "low")
-                                 <*> liftM repairRational (v .: "vol")
-                                 <*> liftM repairRational (v .: "vol_cur")
+                                 <*> v .: "buy"
+                                 <*> v .: "sell"
+                                 <*> v .: "last"
+                                 <*> v .: "high"
+                                 <*> v .: "avg"
+                                 <*> v .: "low"
+                                 <*> v .: "vol"
+                                 <*> v .: "vol_cur"
   parseJSON x           = fail ("Received wrong kind of JSON entity: " ++ show x)
 
 -- == Offers == --
@@ -398,7 +398,7 @@ data Offer = Offer {
   deriving (Show)
 
 instance FromJSON Offer where
-  parseJSON (Array a) = (\[a, b] -> Offer a b) <$> mapM (liftM repairRational . parseJSON) (V.toList a)
+  parseJSON (Array a) = (\[a, b] -> Offer a b) <$> mapM parseJSON (V.toList a)
   parseJSON x          = fail ("Received wrong kind of JSON entity: " ++ show x)
 
 data Offers = Offers {
@@ -456,7 +456,7 @@ instance FromJSON MyInfo where
                                                                    <*> liftM (/= (0 :: Word8))           (rights' .: "trade")
                                                                    <*> liftM (/= (0 :: Word8))           (rights' .: "withdraw")
                                      where
-                                       convert r k v = H.insert (toCurrency k) (repairRational v) r
+                                       convert r k v = H.insert (toCurrency k) v r
                                    Nothing  -> fail "MyInfo is missing rights"
                                    _        -> fail "MyInfo has malformed rights"
   parseJSON x           = fail ("Received wrong kind of JSON entity: " ++ show x)
@@ -485,12 +485,12 @@ instance Show PlacedTrade where
                 . showChar   '}'
 
 instance FromJSON PlacedTrade where
-  parseJSON (Object !v) = PlacedTrade <$>                                         (v .: "order_id")
-                                      <*> liftM (repairRational)                  (v .: "received")
-                                      <*> liftM (repairRational)                  (v .: "remains")
+  parseJSON (Object !v) = PlacedTrade <$> v .: "order_id"
+                                      <*> v .: "received"
+                                      <*> v .: "remains"
                                       <*> liftM (H.foldlWithKey' convert H.empty) (v .: "funds")
     where
-      convert r k v = H.insert (toCurrency k) (repairRational v) r
+      convert r k v = H.insert (toCurrency k) v r
   parseJSON x           = fail ("Received wrong kind of JSON entity: " ++ show x)
 
 -- ==== PRIVATE UTILITY METHODS ==== --
@@ -507,9 +507,6 @@ showRational = uncurry f . properFraction
   where
     f n 0 = show n
     f n p = ((show n) ++) . ('.':) . concat . reverse . dropWhile (=="0") . reverse . take 8 . tail . map (show . fst) . iterate (properFraction . (*10) . snd) $ (0, p)
-
-repairRational :: Rational -> Rational
-repairRational = (/(10^8)) . toRational . round . ((10^8)*)
 
 boundedLetterCountBreaks :: [(Int, Integer)]
 letterCountBreaks :: [Integer]
@@ -535,7 +532,7 @@ makeRequest :: (FromJSON t) => SB.ByteString -> [(String, String)] -> Manager ->
 makeRequest !path !params !httpManager = do
                                              let params'       = SB.pack . ('?':) . urlEncodeVars $ params
                                                  pathAndParams = SB.concat [path, params']
-                                             request' <- parseUrl ("https://btc-e.com/api/3/" ++ LL.toString pathAndParams)
+                                             request' <- parseUrl ("https://btc-e.com/api/3/" ++ SB.unpack pathAndParams)
                                              let !request = request' {
                                                                        requestHeaders = ("User-Agent", userAgent):requestHeaders request',
                                                                        responseTimeout = Just 10000000,

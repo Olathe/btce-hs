@@ -1,7 +1,7 @@
 BTC-E web API library for Haskell
 =================================
 
-This is an alpha-stage Haskell library for using the [BTC-E Public [Web] API v3](https://btc-e.com/api/3/documentation) for interacting with [BTC-E](https://btc-e.com/).
+This is an alpha-stage Haskell library for using the [BTC-E Public [Web] API v3](https://btc-e.com/api/3/documentation) to interact with [BTC-E](https://btc-e.com/).
 
 It uses AutoNonce<sup>TM</sup> (I got the idea from [the BtcE.configure method in therussianphysicist's btc-trader library](https://github.com/therussianphysicist/btc-trader/blob/master/btce.rb)). Most other libraries use one of the following strategies:
 * They use a wall clock. This allows only one request per tick and ruins preexisting API keys when the clock overflows Word32.
